@@ -5,63 +5,76 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/golang/glog"
+	"github.com/op/go-logging"
 	"io"
 	"net"
 	"net/textproto"
 	"net/url"
 	"strings"
-	"sync"
 )
 
+var connLogger *logging.Logger = logging.MustGetLogger("Conn")
+
 type conn struct {
-	clientConn net.Conn
-	remote     string
-	serv       *Server
+	rwc    net.Conn
+	brc    *bufio.Reader
+	server *Server
 }
 
-var connPool sync.Pool
-
-func newConn(c net.Conn, serv *Server) *conn {
-	if v := connPool.Get(); v != nil {
-		pc := v.(*conn)
-		pc.clientConn = c
-		return pc
-	}
-	return &conn{clientConn: c, serv: serv}
-}
-
-func putConn(c *conn) {
-	connPool.Put(c)
-}
-
-func (c *conn) close() {
-	c.clientConn.Close()
-	c.remote = ""
-	putConn(c)
-}
-
-// getClientInfo parse client request header to get some information:
-func (c *conn) getClientInfo() (rawHttpRequestHeader bytes.Buffer,
-	host, basicCredential string, isHttps bool, err error) {
-
-	br := newBufioReader(c.clientConn)
-	tp := newTextprotoReader(br)
-
-	defer func() {
-		putBufioReader(br)
-		putTextprotoReader(tp)
-		if err == io.EOF {
-			err = io.ErrUnexpectedEOF
-		}
-	}()
-
-	// First line: GET /index.html HTTP/1.0
-	var s string
-	if s, err = tp.ReadLine(); err != nil {
+// serve tunnel the client connection to remote host
+func (c *conn) serve() {
+    defer c.rwc.Close()
+	rawHttpRequestHeader, remote, credential, isHttps, err := c.getTunnelInfo()
+	if err != nil {
+		connLogger.Error(err)
 		return
 	}
 
-	method, requestURI, _, ok := parseRequestLine(s)
+	if c.auth(credential) == false {
+		connLogger.Error("Auth fail: " + credential)
+		return
+	}
+
+	connLogger.Info("connecting to " + remote)
+	remoteConn, err := net.Dial("tcp", remote)
+	if err != nil {
+		connLogger.Error(err)
+		return
+	}
+
+	if isHttps {
+		// if https, should sent 200 to client
+		_, err = c.rwc.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
+		if err != nil {
+			glog.Errorln(err)
+			return
+		}
+	} else {
+		// if not https, should sent the request header to remote
+		_, err = rawHttpRequestHeader.WriteTo(remoteConn)
+		if err != nil {
+			connLogger.Error(err)
+			return
+		}
+	}
+
+	// build bidirectional-streams
+	connLogger.Info("begin tunnel", c.rwc.RemoteAddr(), "<->", remote)
+	c.tunnel(remoteConn)
+    connLogger.Info("stop tunnel", c.rwc.RemoteAddr(), "<->", remote)
+}
+
+// getClientInfo parse client request header to get some information:
+func (c *conn) getTunnelInfo() (rawReqHeader bytes.Buffer, host, credential string, isHttps bool, err error) {
+	tp := textproto.NewReader(c.brc)
+
+	// First line: GET /index.html HTTP/1.0
+	var requestLine string
+	if requestLine, err = tp.ReadLine(); err != nil {
+		return
+	}
+
+	method, requestURI, _, ok := parseRequestLine(requestLine)
 	if !ok {
 		err = &BadRequestError{"malformed HTTP request"}
 		return
@@ -85,7 +98,7 @@ func (c *conn) getClientInfo() (rawHttpRequestHeader bytes.Buffer,
 		return
 	}
 
-	basicCredential = mimeHeader.Get("Proxy-Authorization")
+	credential = mimeHeader.Get("Proxy-Authorization")
 
 	if uriInfo.Host == "" {
 		host = mimeHeader.Get("Host")
@@ -97,83 +110,44 @@ func (c *conn) getClientInfo() (rawHttpRequestHeader bytes.Buffer,
 		}
 	}
 
-	// build http request header
-	rawHttpRequestHeader.WriteString(s + "\r\n")
+	// rebuild http request header
+	rawReqHeader.WriteString(requestLine + "\r\n")
 	for k, vs := range mimeHeader {
 		for _, v := range vs {
-			rawHttpRequestHeader.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
+			rawReqHeader.WriteString(fmt.Sprintf("%s: %s\r\n", k, v))
 		}
 	}
-	rawHttpRequestHeader.WriteString("\r\n")
+	rawReqHeader.WriteString("\r\n")
 	return
 }
 
 // auth provide basic authentication
-func (c *conn) auth(basicCredential string) bool {
-	if c.serv.needAuth() == false {
+func (c *conn) auth(credential string) bool {
+	if c.server.isAuth() == false || c.server.validateCredential(credential) {
 		return true
 	}
-	if basicCredential == "" {
-		glog.V(1).Infoln("ask for auth")
-		// 407
-		_, err := c.clientConn.Write([]byte(
-			"HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"*\"\r\n\r\n"))
-		if err != nil {
-			glog.Errorln(err)
-			return false
-		}
-		// get basic credential
-		_, _, basicCredential, _, err = c.getClientInfo()
-		if err != nil {
-			glog.Errorln(err)
-			return false
-		}
+	// 407
+	_, err := c.rwc.Write(
+		[]byte("HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm=\"*\"\r\n\r\n"))
+	if err != nil {
+		connLogger.Error(err)
 	}
-	return c.serv.validateCredentials(basicCredential)
+	return false
 }
 
-// serve tunnel the client connection to remote host
-func (c *conn) serve() {
-	if c.clientConn == nil {
-		return
-	}
-	defer c.close()
-
-	rawHttpRequestHeader, host, basicCredential, isHttps, err := c.getClientInfo()
+// tunnel http message between client and server
+func (c *conn) tunnel(remoteConn net.Conn) {
+	go func() {
+		_, err := c.brc.WriteTo(remoteConn)
+		if err != nil {
+			connLogger.Warning(err)
+		}
+        remoteConn.Close()
+	}()
+	_, err := io.Copy(c.rwc, remoteConn)
 	if err != nil {
-		glog.Errorln(err)
-		return
+		connLogger.Warning(err)
 	}
-
-	if c.auth(basicCredential) == false {
-		glog.Errorln("auth fail: " + basicCredential)
-		return
-	}
-
-	c.remote = host
-	glog.V(1).Infoln("connecting to " + c.remote)
-	remote, err := net.Dial("tcp", c.remote)
-	if err != nil {
-		glog.Errorln(err)
-		return
-	}
-
-	if isHttps {
-		// if https, should sent 200 to client
-		_, err = c.clientConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
-	} else {
-		// if not https, should sent the read header to remote
-		_, err = rawHttpRequestHeader.WriteTo(remote)
-	}
-	if err != nil {
-		glog.Errorln(err)
-		return
-	}
-
-	// build bidirectional-streams
-	glog.V(1).Infoln("tunneling to " + c.remote)
-	go tunnel(remote, c.clientConn)
-	tunnel(c.clientConn, remote)
 }
 
 func parseRequestLine(line string) (method, requestURI, proto string, ok bool) {
@@ -192,45 +166,4 @@ type BadRequestError struct {
 
 func (b *BadRequestError) Error() string {
 	return b.what
-}
-
-var bufioReaderPool sync.Pool
-
-func newBufioReader(r io.Reader) *bufio.Reader {
-	if v := bufioReaderPool.Get(); v != nil {
-		br := v.(*bufio.Reader)
-		br.Reset(r)
-		return br
-	}
-	// Note: if this reader size is every changed, update
-	// TestHandlerBodyClose's assumptions.
-	return bufio.NewReader(r)
-}
-
-func putBufioReader(br *bufio.Reader) {
-	br.Reset(nil)
-	bufioReaderPool.Put(br)
-}
-
-var textprotoReaderPool sync.Pool
-
-func newTextprotoReader(br *bufio.Reader) *textproto.Reader {
-	if v := textprotoReaderPool.Get(); v != nil {
-		tr := v.(*textproto.Reader)
-		tr.R = br
-		return tr
-	}
-	return textproto.NewReader(br)
-}
-
-func putTextprotoReader(r *textproto.Reader) {
-	r.R = nil
-	textprotoReaderPool.Put(r)
-}
-
-func tunnel(dst io.Writer, src io.Reader) {
-	_, err := io.Copy(dst, src)
-	if err != nil {
-		glog.Errorln(err)
-	}
 }

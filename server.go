@@ -1,56 +1,72 @@
 package gsproxy
 
 import (
+	"bufio"
 	"encoding/base64"
-	"github.com/golang/glog"
+	"github.com/op/go-logging"
 	"net"
 	"strings"
 )
 
+var servLogger *logging.Logger = logging.MustGetLogger("Server")
+
 type Server struct {
-	listenAddr            string
-	base64BasicCredential string
-	ln                    net.Listener
+	listener   net.Listener
+	addr       string
+	credential string
 }
 
-func NewServer(listenAddr, basicCredential string, genAuth bool) *Server {
+// NewServer create a proxy server
+func NewServer(Addr, credential string, genAuth bool) *Server {
 	if genAuth {
-		basicCredential = RandStringBytesMaskImprSrc(16) + ":" +
+		credential = RandStringBytesMaskImprSrc(16) + ":" +
 			RandStringBytesMaskImprSrc(16)
 	}
-	glog.Infof("use %s for auth", basicCredential)
-	return &Server{listenAddr: listenAddr,
-		base64BasicCredential: base64.StdEncoding.EncodeToString([]byte(basicCredential))}
+	return &Server{addr: Addr, credential: base64.StdEncoding.EncodeToString([]byte(credential))}
 }
 
-func (s *Server) needAuth() bool {
-	return s.base64BasicCredential != ""
+// Start a proxy server
+func (s *Server) Start() {
+	var err error
+	s.listener, err = net.Listen("tcp", s.addr)
+	if err != nil {
+		servLogger.Fatal(err)
+	}
+
+    if s.credential != "" {
+        servLogger.Infof("use %s for auth\n", s.credential)
+    }
+	servLogger.Infof("proxy listen in %s, waiting for connection...\n", s.addr)
+
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			servLogger.Error(err)
+			continue
+		}
+		go s.newConn(conn).serve()
+	}
+}
+
+// newConn create a conn to serve client request
+func (s *Server) newConn(rwc net.Conn) *conn {
+	return &conn{
+		server: s,
+		rwc:    rwc,
+		brc:    bufio.NewReader(rwc),
+	}
+}
+
+// isAuth return weather the client should be authenticate
+func (s *Server) isAuth() bool {
+	return s.credential != ""
 }
 
 // validateCredentials parse "Basic basic-credentials" and validate it
-func (s *Server) validateCredentials(basicCredential string) bool {
+func (s *Server) validateCredential(basicCredential string) bool {
 	c := strings.Split(basicCredential, " ")
-	if len(c) == 2 && strings.EqualFold(c[0], "Basic") && c[1] == s.base64BasicCredential {
+	if len(c) == 2 && strings.EqualFold(c[0], "Basic") && c[1] == s.credential {
 		return true
 	}
 	return false
-}
-
-// Start a proxy
-func (s *Server) Start() {
-	var err error
-	s.ln, err = net.Listen("tcp", s.listenAddr)
-	if err != nil {
-		glog.Fatalln(err)
-	}
-
-	glog.Infof("proxy listen in %s, waiting for connection...\n", s.listenAddr)
-	for {
-		conn, err := s.ln.Accept()
-		if err != nil {
-			glog.Errorln(err)
-			continue
-		}
-		go newConn(conn, s).serve()
-	}
 }

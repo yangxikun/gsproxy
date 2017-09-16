@@ -1,0 +1,3 @@
+package: github.com/yangxikun/gsproxy
+import:
+- package: github.com/op/go-logging
