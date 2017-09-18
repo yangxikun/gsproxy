@@ -18,6 +18,6 @@ Usage
 
 Start proxy
 
-    $ gsproxy -logtostderr -auth test:1234
+    $ gsproxy -auth test:1234
 
 Run `gsproxy -help` for more information.

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/golang/glog"
 	"github.com/op/go-logging"
 	"io"
 	"net"
@@ -46,7 +45,7 @@ func (c *conn) serve() {
 		// if https, should sent 200 to client
 		_, err = c.rwc.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n"))
 		if err != nil {
-			glog.Errorln(err)
+			connLogger.Error(err)
 			return
 		}
 	} else {
