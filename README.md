@@ -18,6 +18,25 @@ Usage
 
 Start proxy
 
-    $ gsproxy -auth test:1234
+    $ gsproxy --auth test1:1234,test2:5678
 
-Run `gsproxy -help` for more information.
+Run `gsproxy -help` for more information:
+
+    Usage of gsproxy:
+      --credentials string   basic credentials: username1:password1,username2:password2
+      --gen_credential       generate a credential for auth
+      --listen string        proxy listen addr (default ":8080")
+
+Config by environment variable:
+
+    GSPROXY_LISTEN=:9898
+    GSPROXY_CREDENTIALS=test1:1234,test2:5678
+    GSPROXY_GEN_CREDENTIAL=true
+
+Config by yaml file:
+
+    listen: :8181
+    credentials:
+      - aaa:bbb
+      - ccc:ddd
+    gen_credential: false

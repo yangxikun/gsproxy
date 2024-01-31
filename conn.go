@@ -4,15 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/op/go-logging"
 	"io"
 	"net"
 	"net/textproto"
 	"net/url"
 	"strings"
+
+	"github.com/op/go-logging"
 )
 
-var connLogger *logging.Logger = logging.MustGetLogger("Conn")
+var connLogger = logging.MustGetLogger("Conn")
 
 type conn struct {
 	rwc    net.Conn
@@ -22,7 +23,7 @@ type conn struct {
 
 // serve tunnel the client connection to remote host
 func (c *conn) serve() {
-    defer c.rwc.Close()
+	defer c.rwc.Close()
 	rawHttpRequestHeader, remote, credential, isHttps, err := c.getTunnelInfo()
 	if err != nil {
 		connLogger.Error(err)
@@ -60,7 +61,7 @@ func (c *conn) serve() {
 	// build bidirectional-streams
 	connLogger.Info("begin tunnel", c.rwc.RemoteAddr(), "<->", remote)
 	c.tunnel(remoteConn)
-    connLogger.Info("stop tunnel", c.rwc.RemoteAddr(), "<->", remote)
+	connLogger.Info("stop tunnel", c.rwc.RemoteAddr(), "<->", remote)
 }
 
 // getClientInfo parse client request header to get some information:
@@ -141,7 +142,7 @@ func (c *conn) tunnel(remoteConn net.Conn) {
 		if err != nil {
 			connLogger.Warning(err)
 		}
-        remoteConn.Close()
+		remoteConn.Close()
 	}()
 	_, err := io.Copy(c.rwc, remoteConn)
 	if err != nil {
