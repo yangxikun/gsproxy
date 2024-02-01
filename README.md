@@ -14,7 +14,7 @@ Usage
 
 Start proxy
 
-    $ gsproxy --auth test1:1234,test2:5678
+    $ gsproxy --credentials test1:1234,test2:5678
 
 Run `gsproxy -help` for more information:
 
