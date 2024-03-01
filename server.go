@@ -4,22 +4,30 @@ import (
 	"bufio"
 	"encoding/base64"
 	"net"
+	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/op/go-logging"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/samber/lo"
 )
 
 var servLogger = logging.MustGetLogger("Server")
 
 type Server struct {
-	listener    net.Listener
-	addr        string
-	credentials []string
+	listener          net.Listener
+	addr              string
+	exposeMetricsAddr string
+	credentials       []string
+
+	activeConnMetrics prometheus.Gauge
 }
 
 // NewServer create a proxy server
-func NewServer(addr string, credentials []string, genCredential bool) *Server {
+func NewServer(addr, exposeMetricsAddr string, credentials []string, genCredential bool) *Server {
 	if genCredential {
 		credentials = append(credentials, RandStringBytesMaskImprSrc(16)+":"+
 			RandStringBytesMaskImprSrc(16))
@@ -29,11 +37,32 @@ func NewServer(addr string, credentials []string, genCredential bool) *Server {
 		servLogger.Info(credential)
 		credentials[i] = base64.StdEncoding.EncodeToString([]byte(credential))
 	}
-	return &Server{addr: addr, credentials: credentials}
+	return &Server{addr: addr, exposeMetricsAddr: exposeMetricsAddr, credentials: credentials}
 }
 
 // Start a proxy server
 func (s *Server) Start() {
+	if s.exposeMetricsAddr != "" {
+		reg := prometheus.NewRegistry()
+		reg.MustRegister(collectors.NewGoCollector(
+			collectors.WithGoCollectorRuntimeMetrics(collectors.GoRuntimeMetricsRule{Matcher: regexp.MustCompile("/.*")}),
+		))
+		s.activeConnMetrics = prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "gsproxy",
+			Subsystem: "server",
+			Name:      "active_connection",
+		})
+		reg.MustRegister(s.activeConnMetrics)
+		go func() {
+			// Expose the registered metrics via HTTP.
+			http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+			servLogger.Infof("expose metrics listen in %s\n", s.exposeMetricsAddr)
+			if err := http.ListenAndServe(s.exposeMetricsAddr, nil); err != nil {
+				servLogger.Error(err)
+			}
+		}()
+	}
+
 	var err error
 	s.listener, err = net.Listen("tcp", s.addr)
 	if err != nil {
