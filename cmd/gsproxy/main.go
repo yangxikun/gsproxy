@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+	_ "go.uber.org/automaxprocs"
 )
 
 func main() {
