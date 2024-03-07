@@ -17,6 +17,7 @@ import (
 
 var servLogger = logging.MustGetLogger("Server")
 
+// Server 代理服务
 type Server struct {
 	listener          net.Listener
 	addr              string

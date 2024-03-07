@@ -137,10 +137,12 @@ func (c *conn) auth(credential string) bool {
 
 // tunnel http message between client and server
 func (c *conn) tunnel(remoteConn net.Conn) {
-	c.server.activeConnMetrics.Inc()
-	defer func() {
-		c.server.activeConnMetrics.Dec()
-	}()
+	if c.server.activeConnMetrics != nil {
+		c.server.activeConnMetrics.Inc()
+		defer func() {
+			c.server.activeConnMetrics.Dec()
+		}()
+	}
 	go func() {
 		_, err := c.brc.WriteTo(remoteConn)
 		if err != nil {
@@ -164,6 +166,7 @@ func parseRequestLine(line string) (method, requestURI, proto string, ok bool) {
 	return line[:s1], line[s1+1 : s2], line[s2+1:], true
 }
 
+// BadRequestError 非法的请求
 type BadRequestError struct {
 	what string
 }
