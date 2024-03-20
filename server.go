@@ -23,12 +23,13 @@ type Server struct {
 	addr              string
 	exposeMetricsAddr string
 	credentials       []string
+	blackDomains      []string
 
 	activeConnMetrics prometheus.Gauge
 }
 
 // NewServer create a proxy server
-func NewServer(addr, exposeMetricsAddr string, credentials []string, genCredential bool) *Server {
+func NewServer(addr, exposeMetricsAddr string, credentials []string, genCredential bool, blackDomains []string) *Server {
 	if genCredential {
 		credentials = append(credentials, RandStringBytesMaskImprSrc(16)+":"+
 			RandStringBytesMaskImprSrc(16))
@@ -38,7 +39,7 @@ func NewServer(addr, exposeMetricsAddr string, credentials []string, genCredenti
 		servLogger.Info(credential)
 		credentials[i] = base64.StdEncoding.EncodeToString([]byte(credential))
 	}
-	return &Server{addr: addr, exposeMetricsAddr: exposeMetricsAddr, credentials: credentials}
+	return &Server{addr: addr, exposeMetricsAddr: exposeMetricsAddr, credentials: credentials, blackDomains: blackDomains}
 }
 
 // Start a proxy server
@@ -103,4 +104,13 @@ func (s *Server) validateCredential(basicCredential string) bool {
 		return true
 	}
 	return false
+}
+
+func (s *Server) shouldProxy(domain string) bool {
+	for _, blackDomain := range s.blackDomains {
+		if blackDomain == domain {
+			return false
+		}
+	}
+	return true
 }

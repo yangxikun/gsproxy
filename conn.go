@@ -35,6 +35,15 @@ func (c *conn) serve() {
 		return
 	}
 
+	if !c.server.shouldProxy(strings.Split(remote, ":")[0]) {
+		connLogger.Error("domain is in black list: " + remote)
+		_, err = c.rwc.Write([]byte("HTTP/1.1 403 Forbidden\r\n\r\n"))
+		if err != nil {
+			connLogger.Error(err)
+		}
+		return
+	}
+
 	connLogger.Info("connecting to " + remote)
 	remoteConn, err := net.Dial("tcp", remote)
 	if err != nil {
