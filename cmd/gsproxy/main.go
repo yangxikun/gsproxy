@@ -31,6 +31,7 @@ func main() {
 	flag.String("expose_metrics_listen", "", "expose metrics listen addr")
 	flag.String("credentials", "", "basic credentials: username1:password1,username2:password2")
 	flag.Bool("gen_credential", false, "generate a credential for auth")
+	flag.Bool("log_color", false, "enable log color")
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 	pflag.Parse()
 	if err = viper.BindPFlags(pflag.CommandLine); err != nil {
@@ -41,10 +42,12 @@ func main() {
 		ExposeMetricsListen string `mapstructure:"expose_metrics_listen"`
 		Credentials         []string
 		GenCredential       bool `mapstructure:"gen_credential"`
+		LogColor            bool `mapstructure:"log_color"`
 	}
 	if err = viper.Unmarshal(&config); err != nil {
 		log.Fatal(err)
 	}
+	gsproxy.InitLog(config.LogColor)
 	server := gsproxy.NewServer(config.Listen, config.ExposeMetricsListen, config.Credentials, config.GenCredential)
 	server.Start()
 }
