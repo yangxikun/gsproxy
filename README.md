@@ -19,10 +19,12 @@ Start proxy
 Run `gsproxy -help` for more information:
 
     Usage of gsproxy:
-      --credentials string   basic credentials: username1:password1,username2:password2
-      --expose_metrics_listen string   expose metrics listen addr, url path: /metrics
-      --gen_credential       generate a credential for auth
-      --listen string        proxy listen addr (default ":8080")
+      --black_domains_file string      list of domains that do not want to be proxied
+      --credentials string             basic credentials: username1:password1,username2:password2
+      --expose_metrics_listen string   expose metrics listen addr
+      --gen_credential                 generate a credential for auth
+      --listen string                  proxy listen addr (default ":8080")
+      --log_color                      enable log color
 
 Config by environment variable:
 
