@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"net"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -108,9 +109,18 @@ func (s *Server) validateCredential(basicCredential string) bool {
 
 func (s *Server) shouldProxy(domain string) bool {
 	for _, blackDomain := range s.blackDomains {
-		if blackDomain == domain {
+		if matchPattern(blackDomain, domain) {
 			return false
 		}
 	}
 	return true
+}
+
+// matchPattern checks whether a string matches a pattern
+func matchPattern(pattern, s string) bool {
+	if pattern == "*" {
+		return true
+	}
+	matched, _ := filepath.Match(pattern, s)
+	return matched
 }

@@ -1,2 +1,4 @@
 abc.com
 123.com
+*.def.com
+ghi.*.com
